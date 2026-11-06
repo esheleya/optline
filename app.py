@@ -107,8 +107,11 @@ def allocate_rpw(ids,times,machines,predecessors,successors,takt,limits,skills):
                 target=min(candidates,key=lambda s:s["Tempo"]); target["Operações"].append(op); target["Tempo"]+=times[op]
                 assigned.add(op); pending.remove(op); placed=True; continue
             if sum(s["Equipamento"]==machine for s in stations) >= int(limits.get(machine,0)): continue
-            used={s["Costureira"] for s in stations}
-            eligible=[w for w,ms in skill_map.items() if machine in ms and w not in used]
+            # A célula é dinâmica: a mesma costureira pode atuar em mais de
+            # um tipo de máquina, desde que possua a habilidade correspondente.
+            # A disponibilidade física limitante aqui é a quantidade de máquinas;
+            # não bloqueamos a trabalhadora apenas por ela já estar em outro posto.
+            eligible=[w for w,ms in skill_map.items() if machine in ms]
             if eligible:
                 worker=min(eligible,key=lambda w:sum(s["Tempo"] for s in stations if s["Costureira"]==w))
                 stations.append({"Costureira":worker,"Equipamento":machine,"Operações":[op],"Tempo":times[op]})
@@ -124,7 +127,16 @@ def calc_metrics(stations,times,takt):
     return {"n":n,"total":total,"loads":loads,"tc":mx,"eff":total/(n*takt)*100 if n else 0,"idle":n*takt-total if n else 0,"smooth":math.sqrt(sum((mx-x)**2 for x in loads)) if loads else 0,"theoretical":math.ceil(total/takt) if takt else 0}
 
 
-def precedence_graph(ids,times,names,predecessors,station_of=None):
+MACHINE_COLORS = {
+    "Overloque": "#2E86AB",
+    "Reta": "#3CB371",
+    "Franzidor": "#F18F01",
+    "Galoneira": "#A23B72",
+}
+STATION_COLORS = ["#1565C0", "#EF6C00", "#6A1B9A", "#F9A825"]
+
+
+def precedence_graph(ids,times,names,predecessors,machines,station_of=None):
     g=nx.DiGraph(); g.add_nodes_from(ids)
     for op,ps in predecessors.items(): g.add_edges_from((p,op) for p in ps)
     depth={x:0 for x in ids}
@@ -138,11 +150,17 @@ def precedence_graph(ids,times,names,predecessors,station_of=None):
         for i,x in enumerate(sorted(group)): pos[x]=(d*2.4,-(i-(len(group)-1)/2)*1.4)
     ex=[]; ey=[]
     for a,b in g.edges(): ex += [pos[a][0],pos[b][0],None]; ey += [pos[a][1],pos[b][1],None]
-    palette=["#2E86AB","#A23B72","#F18F01","#3CB371","#C73E1D","#6A4C93","#1982C4","#FFCA3A"]
-    colors=[station_of.get(x,0) if station_of else 0 for x in ids]
+    fill_colors=[MACHINE_COLORS.get(machines.get(x,""), "#999999") for x in ids]
+    border_colors=[STATION_COLORS[station_of[x] % len(STATION_COLORS)] if station_of and x in station_of else "#FFFFFF" for x in ids]
     fig=go.Figure(); fig.add_trace(go.Scatter(x=ex,y=ey,mode="lines",line=dict(color="#999",width=1.5),hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=[pos[x][0] for x in ids],y=[pos[x][1] for x in ids],mode="markers+text",text=ids,textposition="middle center",marker=dict(size=52,color=[palette[c%len(palette)] for c in colors],line=dict(width=2,color="white")),hovertext=[f"{x} — {names[x]}<br>Tempo: {times[x]:.3f}" for x in ids],hoverinfo="text",textfont=dict(color="white",size=11)))
-    fig.update_layout(height=480,showlegend=False,plot_bgcolor="white",xaxis=dict(visible=False),yaxis=dict(visible=False,scaleanchor="x",scaleratio=1),margin=dict(t=20,b=20,l=10,r=10))
+    fig.add_trace(go.Scatter(x=[pos[x][0] for x in ids],y=[pos[x][1] for x in ids],mode="markers+text",text=ids,textposition="middle center",marker=dict(size=52,color=fill_colors,line=dict(width=5,color=border_colors)),hovertext=[f"{x} — {names[x]}<br>Equipamento: {machines.get(x,'')}<br>Posto: P{station_of[x]+1 if station_of and x in station_of else '-'}<br>Tempo: {times[x]:.3f}" for x in ids],hoverinfo="text",textfont=dict(color="white",size=11),showlegend=False))
+    for machine in MACHINE_TYPES:
+        if machine in {machines.get(x) for x in ids}:
+            fig.add_trace(go.Scatter(x=[None],y=[None],mode="markers",marker=dict(size=12,color=MACHINE_COLORS[machine],symbol="circle"),name=f"Máquina — {machine}",showlegend=True))
+    if station_of:
+        for station in sorted(set(station_of.values())):
+            fig.add_trace(go.Scatter(x=[None],y=[None],mode="markers",marker=dict(size=12,color="white",line=dict(color=STATION_COLORS[station % len(STATION_COLORS)],width=4),symbol="square"),name=f"Posto — P{station+1}",showlegend=True))
+    fig.update_layout(height=480,showlegend=True,legend_title_text="Preenchimento = máquina | Borda = posto",plot_bgcolor="white",xaxis=dict(visible=False),yaxis=dict(visible=False,scaleanchor="x",scaleratio=1),margin=dict(t=20,b=20,l=10,r=10))
     return fig
 
 
@@ -170,7 +188,7 @@ if "skills" not in st.session_state: st.session_state["skills"]=DEFAULT_SKILLS.c
 skills_edited=st.sidebar.data_editor(st.session_state["skills"],num_rows="dynamic",hide_index=True,use_container_width=True,key="skills_editor"); skills=skills_edited.to_dict("records")
 
 st.title("🧵 OptiLine — Balanceador da Célula de Costura")
-st.caption("Alocação por RPW respeitando precedência, tempo de ciclo, máquinas disponíveis e habilidades das costureiras.")
+st.caption("Alocação por RPW respeitando precedência, tempo de ciclo, máquinas disponíveis e habilidades. A mesma costureira pode transitar entre máquinas que saiba operar.")
 if "operations" not in st.session_state: st.session_state["operations"]=EXAMPLE.copy()
 c1,c2,c3=st.columns([1,1,2])
 if c1.button("Carregar exemplo da proposta",use_container_width=True): st.session_state["operations"]=EXAMPLE.copy(); st.rerun()
@@ -185,7 +203,7 @@ edited=st.data_editor(normalize_operations(st.session_state["operations"]),num_r
 if not edited.empty:
     ids,times,names,machines,predecessors,successors,_=build_model(edited)
     st.info(f"{len(ids)} operações | Tempo total: {sum(times.values()):.3f} min | Mínimo teórico de postos: {math.ceil(sum(times.values())/takt) if takt else 0}")
-    st.subheader("2. Diagrama de precedência"); st.plotly_chart(precedence_graph(ids,times,names,predecessors),use_container_width=True)
+    st.subheader("2. Diagrama de precedência"); st.plotly_chart(precedence_graph(ids,times,names,predecessors,machines),use_container_width=True)
 
 st.divider(); run=st.button("🚀 Gerar balanceamento RPW",type="primary",use_container_width=True)
 if run:
@@ -197,7 +215,7 @@ if run:
     st.success("Balanceamento gerado respeitando as restrições informadas.")
     a,b,c,d=st.columns(4); a.metric("Postos",met["n"]); b.metric("Eficiência",f"{met['eff']:.2f}%"); c.metric("Ociosidade total",f"{met['idle']:.3f} min"); d.metric("Índice de suavidade",f"{met['smooth']:.4f}")
     l,r=st.columns([1.2,1])
-    with l: st.plotly_chart(precedence_graph(ids,times,names,predecessors,station_of),use_container_width=True)
+    with l: st.plotly_chart(precedence_graph(ids,times,names,predecessors,machines,station_of),use_container_width=True)
     with r:
         fig=go.Figure()
         for i,s in enumerate(stations): fig.add_trace(go.Bar(x=[f"P{i+1}"],y=[s["Tempo"]],name=f"P{i+1}",text=[f"{s['Tempo']:.3f}"],textposition="inside"))
@@ -205,7 +223,7 @@ if run:
     rows=[]
     for i,s in enumerate(stations,1): rows.append({"Posto":f"P{i}","Costureira":s["Costureira"],"Equipamento":s["Equipamento"],"Operações":" → ".join(f"{x} — {names[x]}" for x in s["Operações"]),"Carga (min)":round(s["Tempo"],4),"Ociosidade (min)":round(takt-s["Tempo"],4),"Utilização (%)":round(s["Tempo"]/takt*100,2),"Precedências":"Sim"})
     result=pd.DataFrame(rows); st.subheader("3. Distribuição proposta"); st.dataframe(result,use_container_width=True,hide_index=True)
-    st.subheader("4. Compatibilidade e recursos"); skill_map={str(s["Costureira"]):s for s in skills}; compat=[]
+    st.subheader("4. Compatibilidade e recursos"); st.caption("A costureira alocada pode aparecer em mais de um posto quando possui habilidade para os respectivos equipamentos. As cores do diagrama representam as máquinas."); skill_map={str(s["Costureira"]):s for s in skills}; compat=[]
     for i,s in enumerate(stations,1):
         eligible=[w for w,row in skill_map.items() if int(row.get(s["Equipamento"],0))==1]
         compat.append({"Posto":f"P{i}","Equipamento":s["Equipamento"],"Costureira alocada":s["Costureira"],"Costureiras habilitadas":", ".join(eligible)})

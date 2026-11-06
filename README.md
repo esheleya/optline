@@ -11,9 +11,10 @@ Aplicativo em Streamlit para gerar uma proposta de balanceamento de uma célula 
 - Limite de tempo de ciclo por posto.
 - Limite físico de máquinas por tipo.
 - Matriz editável de habilidades das costureiras A–H.
-- Cada posto recebe uma costureira habilitada para o equipamento da operação.
+- Cada operação recebe uma costureira habilitada para o equipamento exigido.
+- Uma mesma costureira pode aparecer em mais de um posto e transitar entre máquinas nas quais possui habilidade.
 - Indicadores de postos, carga, ociosidade, eficiência e índice de suavidade.
-- Diagrama de precedência colorido por posto.
+- Diagrama de precedência colorido por equipamento, com legenda de máquinas e postos.
 - Exportação CSV e relatório XLSX com distribuição, pesos RPW, indicadores, máquinas e habilidades.
 
 ## Formato de entrada
@@ -40,4 +41,4 @@ Na barra lateral, ajuste o tempo de ciclo, a quantidade disponível de cada máq
 
 ## Observação sobre a alocação
 
-O algoritmo considera cada posto como uma combinação de **uma costureira + um equipamento**. Uma costureira não é reutilizada em dois postos simultâneos e a quantidade de postos de cada equipamento não pode exceder o limite físico informado. Se as restrições forem incompatíveis, o sistema apresenta a operação que não pôde ser alocada e orienta a revisar tempo de ciclo, máquinas ou habilidades.
+O algoritmo considera os postos como recursos de máquina, mas não prende a costureira a uma única máquina. A mesma costureira pode ser selecionada para diferentes postos quando possui as habilidades correspondentes, representando a dinâmica da célula. No diagrama, o **preenchimento** do nó representa a máquina e a **borda** representa o posto; os postos usam azul, laranja, roxo e amarelo em sequência. A quantidade de postos de cada equipamento não pode exceder o limite físico informado. Se as restrições forem incompatíveis, o sistema apresenta a operação que não pôde ser alocada e orienta a revisar tempo de ciclo, máquinas ou habilidades.
