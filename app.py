@@ -247,4 +247,8 @@ if run:
     weight_df=pd.DataFrame([{"ID":x,"Operação":names[x],"Equipamento":machines[x],"Tempo":times[x],"Peso posicional":round(weights[x],4),"Posto":f"P{station_of[x]+1}"} for x in sorted(ids,key=lambda x:(-weights[x],x))]); st.dataframe(weight_df,use_container_width=True,hide_index=True)
     st.subheader("6. Exportação")
     st.download_button("Baixar distribuição CSV",result.to_csv(index=False).encode("utf-8"),"balanceamento_costura.csv","text/csv",use_container_width=True)
-    st.download_button("Baixar relatório completo XLSX",build_xlsx(result,weight_df,met,takt,limits,pd.DataFrame(skills)),"relatorio_balanceamento_costura.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    try:
+        xlsx_data=build_xlsx(result,weight_df,met,takt,limits,pd.DataFrame(skills))
+        st.download_button("Baixar relatório completo XLSX",xlsx_data,"relatorio_balanceamento_costura.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+    except ModuleNotFoundError:
+        st.warning("A exportação XLSX precisa do pacote xlsxwriter. O CSV continua disponível; instale as dependências atualizadas e reinicie o aplicativo.")
