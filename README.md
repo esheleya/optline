@@ -11,8 +11,9 @@ Aplicativo em Streamlit para gerar uma proposta de balanceamento de uma célula 
 - Limite de tempo de ciclo por posto.
 - Limite físico de máquinas por tipo.
 - Matriz editável de habilidades das costureiras A–H.
-- Cada operação recebe uma costureira habilitada para o equipamento exigido.
-- Uma mesma costureira pode aparecer em mais de um posto e transitar entre máquinas nas quais possui habilidade.
+- Cada posto é associado a uma costureira, que pode operar mais de um tipo de máquina.
+- Uma mesma costureira pode receber operações de equipamentos diferentes quando possui as habilidades correspondentes.
+- A alocação tenta preencher o tempo de ciclo e equilibrar as cargas dos postos, respeitando a quantidade física de cada máquina.
 - Indicadores de postos, carga, ociosidade, eficiência e índice de suavidade.
 - Diagrama de precedência colorido por equipamento, com legenda de máquinas e postos.
 - Exportação CSV e relatório XLSX com distribuição, pesos RPW, indicadores, máquinas e habilidades.
@@ -41,4 +42,4 @@ Na barra lateral, ajuste o tempo de ciclo, a quantidade disponível de cada máq
 
 ## Observação sobre a alocação
 
-O algoritmo considera os postos como recursos de máquina, mas não prende a costureira a uma única máquina. A mesma costureira pode ser selecionada para diferentes postos quando possui as habilidades correspondentes, representando a dinâmica da célula. No diagrama, o **preenchimento** do nó representa a máquina e a **borda** representa o posto; os postos usam azul, laranja, roxo e amarelo em sequência. A quantidade de postos de cada equipamento não pode exceder o limite físico informado. Se as restrições forem incompatíveis, o sistema apresenta a operação que não pôde ser alocada e orienta a revisar tempo de ciclo, máquinas ou habilidades.
+O algoritmo considera cada costureira como um posto de trabalho. Ela pode transitar entre máquinas e executar operações de equipamentos diferentes no mesmo posto, desde que tenha habilidade para todos eles. No diagrama, o **preenchimento** do nó representa a máquina e a **borda** representa o posto; os postos usam azul, laranja, roxo e amarelo em sequência. A quantidade de máquinas físicas de cada tipo não pode exceder o limite informado. Se as restrições forem incompatíveis, o sistema apresenta a operação que não pôde ser alocada e orienta a revisar tempo de ciclo, máquinas ou habilidades.

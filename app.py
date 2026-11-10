@@ -93,28 +93,42 @@ def positional_weights(ids,times,successors):
 
 
 def allocate_rpw(ids,times,machines,predecessors,successors,takt,limits,skills):
+    """Aloca operações em postos de costureiras que podem usar várias máquinas."""
     weights=positional_weights(ids,times,successors)
     order=sorted(ids,key=lambda x:(-weights[x],x)); pending=list(order); assigned=set(); stations=[]
     skill_map={str(s["Costureira"]):{m for m in MACHINE_TYPES if int(s.get(m,0))==1} for s in skills}
+
+    def machine_in_use(machine):
+        return sum(machine in s["Equipamentos"] for s in stations)
+
     while pending:
         available=[op for op in pending if all(p in assigned for p in predecessors[op])]
         if not available: return None,weights,"Não foi possível resolver a ordem de precedência."
         placed=False
         for op in available:
-            machine=machines[op]
-            candidates=[s for s in stations if s["Equipamento"]==machine and s["Tempo"]+times[op] <= takt+1e-9 and machine in skill_map.get(s["Costureira"],set())]
+            machine=machines[op]; duration=times[op]
+            # Qualquer posto compatível pode receber a operação, mesmo que já
+            # tenha operações de outros equipamentos. Preferimos a menor folga.
+            candidates=[s for s in stations
+                        if machine in skill_map.get(s["Costureira"],set())
+                        and s["Tempo"]+duration <= takt+1e-9
+                        and (machine in s["Equipamentos"] or machine_in_use(machine) < int(limits.get(machine,0)))]
             if candidates:
-                target=min(candidates,key=lambda s:s["Tempo"]); target["Operações"].append(op); target["Tempo"]+=times[op]
+                target=min(candidates,key=lambda s:(takt-(s["Tempo"]+duration),s["Tempo"]))
+                target["Operações"].append(op); target["Tempo"]+=duration
+                target["Equipamentos"].add(machine)
                 assigned.add(op); pending.remove(op); placed=True; continue
-            if sum(s["Equipamento"]==machine for s in stations) >= int(limits.get(machine,0)): continue
-            # A célula é dinâmica: a mesma costureira pode atuar em mais de
-            # um tipo de máquina, desde que possua a habilidade correspondente.
-            # A disponibilidade física limitante aqui é a quantidade de máquinas;
-            # não bloqueamos a trabalhadora apenas por ela já estar em outro posto.
-            eligible=[w for w,ms in skill_map.items() if machine in ms]
+
+            # Abrir um novo posto somente quando não houver posto compatível.
+            # Uma costureira continua sendo um único posto, mas pode acumular
+            # máquinas diferentes para as quais tem habilidade.
+            if machine_in_use(machine) >= int(limits.get(machine,0)): continue
+            eligible=[w for w,ms in skill_map.items()
+                      if machine in ms and not any(s["Costureira"]==w for s in stations)]
             if eligible:
-                worker=min(eligible,key=lambda w:sum(s["Tempo"] for s in stations if s["Costureira"]==w))
-                stations.append({"Costureira":worker,"Equipamento":machine,"Operações":[op],"Tempo":times[op]})
+                worker=min(eligible)
+                stations.append({"Costureira":worker,"Equipamentos":{machine},
+                                 "Operações":[op],"Tempo":duration})
                 assigned.add(op); pending.remove(op); placed=True
         if not placed:
             op=available[0]
@@ -169,7 +183,7 @@ def build_xlsx(result,weight_df,met,takt,limits,skills):
     with pd.ExcelWriter(buf,engine="xlsxwriter") as writer:
         result.to_excel(writer,sheet_name="Distribuição",index=False); weight_df.to_excel(writer,sheet_name="Pesos RPW",index=False)
         pd.DataFrame([{"Indicador":"Tempo de ciclo","Valor":takt},{"Indicador":"Postos","Valor":met["n"]},{"Indicador":"Eficiência (%)","Valor":met["eff"]},{"Indicador":"Ociosidade total","Valor":met["idle"]},{"Indicador":"Índice de suavidade","Valor":met["smooth"]}]).to_excel(writer,sheet_name="Indicadores",index=False)
-        pd.DataFrame([{"Equipamento":m,"Disponível":v,"Utilizado":int((result["Equipamento"]==m).sum())} for m,v in limits.items()]).to_excel(writer,sheet_name="Máquinas",index=False)
+        pd.DataFrame([{"Equipamento":m,"Disponível":v,"Utilizado":int(result["Equipamentos utilizados"].fillna("").str.contains(m, regex=False).sum())} for m,v in limits.items()]).to_excel(writer,sheet_name="Máquinas",index=False)
         skills.to_excel(writer,sheet_name="Habilidades",index=False)
     return buf.getvalue()
 
@@ -221,12 +235,13 @@ if run:
         for i,s in enumerate(stations): fig.add_trace(go.Bar(x=[f"P{i+1}"],y=[s["Tempo"]],name=f"P{i+1}",text=[f"{s['Tempo']:.3f}"],textposition="inside"))
         fig.add_hline(y=takt,line_dash="dash",line_color="red",annotation_text=f"TC {takt:.3f}"); fig.update_layout(barmode="stack",height=430,yaxis_title="Minutos",xaxis_title="Posto",showlegend=False); st.plotly_chart(fig,use_container_width=True)
     rows=[]
-    for i,s in enumerate(stations,1): rows.append({"Posto":f"P{i}","Costureira":s["Costureira"],"Equipamento":s["Equipamento"],"Operações":" → ".join(f"{x} — {names[x]}" for x in s["Operações"]),"Carga (min)":round(s["Tempo"],4),"Ociosidade (min)":round(takt-s["Tempo"],4),"Utilização (%)":round(s["Tempo"]/takt*100,2),"Precedências":"Sim"})
+    for i,s in enumerate(stations,1): rows.append({"Posto":f"P{i}","Costureira":s["Costureira"],"Equipamentos utilizados":" / ".join(sorted(s["Equipamentos"])),"Operações":" → ".join(f"{x} — {names[x]}" for x in s["Operações"]),"Carga (min)":round(s["Tempo"],4),"Ociosidade (min)":round(takt-s["Tempo"],4),"Utilização (%)":round(s["Tempo"]/takt*100,2),"Precedências":"Sim"})
     result=pd.DataFrame(rows); st.subheader("3. Distribuição proposta"); st.dataframe(result,use_container_width=True,hide_index=True)
-    st.subheader("4. Compatibilidade e recursos"); st.caption("A costureira alocada pode aparecer em mais de um posto quando possui habilidade para os respectivos equipamentos. As cores do diagrama representam as máquinas."); skill_map={str(s["Costureira"]):s for s in skills}; compat=[]
+    st.subheader("4. Compatibilidade e recursos"); st.caption("Cada posto pertence a uma costureira, que pode operar vários equipamentos quando possui as habilidades correspondentes. As cores do diagrama representam as máquinas."); skill_map={str(s["Costureira"]):s for s in skills}; compat=[]
     for i,s in enumerate(stations,1):
-        eligible=[w for w,row in skill_map.items() if int(row.get(s["Equipamento"],0))==1]
-        compat.append({"Posto":f"P{i}","Equipamento":s["Equipamento"],"Costureira alocada":s["Costureira"],"Costureiras habilitadas":", ".join(eligible)})
+        equip=" / ".join(sorted(s["Equipamentos"]))
+        eligible=[w for w,row in skill_map.items() if all(int(row.get(m,0))==1 for m in s["Equipamentos"])]
+        compat.append({"Posto":f"P{i}","Equipamentos":equip,"Costureira alocada":s["Costureira"],"Costureiras habilitadas para todos os equipamentos":", ".join(eligible)})
     st.dataframe(pd.DataFrame(compat),use_container_width=True,hide_index=True)
     st.subheader("5. Pesos posicionais RPW")
     weight_df=pd.DataFrame([{"ID":x,"Operação":names[x],"Equipamento":machines[x],"Tempo":times[x],"Peso posicional":round(weights[x],4),"Posto":f"P{station_of[x]+1}"} for x in sorted(ids,key=lambda x:(-weights[x],x))]); st.dataframe(weight_df,use_container_width=True,hide_index=True)
